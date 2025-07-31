@@ -164,33 +164,57 @@ document.addEventListener('DOMContentLoaded', () => {
         const vector2ComponentInput = document.getElementById('vector2-component-input');
         const vector2RnInput = document.getElementById('vector2-rn-input');
         const formatDecimalBtn = document.getElementById('format-decimal');
-            const formatFractionBtn = document.getElementById('format-fraction');
-            const backButton = document.getElementById('back-button');
+        const formatFractionBtn = document.getElementById('format-fraction');
+        const backButton = document.getElementById('back-button');
 
-            backButton.addEventListener('click', () => {
-                calculatorContainer.style.display = 'none';
-                selectionScreen.style.display = 'flex';
-            });
+        backButton.addEventListener('click', () => {
+            calculatorContainer.style.display = 'none';
+            selectionScreen.style.display = 'flex';
+        });
 
-            let currentRawResult = null;
-            let currentFormat = 'decimal';
+        let currentRawResult = null;
+        let currentFormat = 'decimal';
 
-        function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
-        function toFraction(decimal) {
-            if (Math.abs(decimal - Math.round(decimal)) < 1e-9) return `${Math.round(decimal)}`;
-            const len = (decimal.toString().split('.')[1] || '').length;
-            if (len > 5) return decimal.toFixed(5);
-            let denominator = Math.pow(10, len);
-            let numerator = Math.round(decimal * denominator);
-            const divisor = gcd(numerator, denominator);
-            return `${numerator / divisor}/${denominator / divisor}`;
+        function toFraction(decimal, tol = 1e-9) {
+            if (decimal === 0) return "0";
+            if (Math.abs(decimal - Math.round(decimal)) < tol) return `${Math.round(decimal)}`;
+
+            let sign = decimal < 0 ? "-" : "";
+            decimal = Math.abs(decimal);
+
+            let n1 = 0, d1 = 1;
+            let n2 = 1, d2 = 0;
+            let b = decimal;
+            while (true) {
+                let a = Math.floor(b);
+                let n = a * n2 + n1;
+                let d = a * d2 + d1;
+                if (d > 10000) break;
+                n1 = n2; d1 = d2;
+                n2 = n; d2 = d;
+                if (Math.abs(decimal - n / d) < tol) return `${sign}${n}/${d}`;
+                b = 1 / (b - a);
+                if (b > 1e12) break;
+            }
+            return `${sign}${decimal.toFixed(5)}`;
         }
+
         function formatNumber(num) {
             if (currentFormat === 'fraction') return toFraction(num);
             return Math.abs(num - Math.round(num)) < 1e-9 ? num.toString() : num.toFixed(3);
         }
+
         function displayResult(result) {
             currentRawResult = result;
+            if (currentFormat === 'fraction' && result.symbolic) {
+                const { components, magSquared } = result.symbolic;
+                const mag = Math.sqrt(magSquared);
+                if (mag % 1 !== 0) { // It's an irrational root
+                    const symbolicStrings = components.map(c => `${c}/√${magSquared}`);
+                    resultOutput.textContent = `[${symbolicStrings.join(', ')}]`;
+                    return;
+                }
+            }
             resultOutput.textContent = Array.isArray(result) ? `[${result.map(formatNumber).join(', ')}]` : formatNumber(result);
         }
 
@@ -222,7 +246,6 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             clearInputs();
             resultOutput.textContent = 'El resultado aparecerá aquí.';
-            // Trigger operation change to adjust vector 2 visibility
             operationSelect.dispatchEvent(new Event('change'));
         });
 
@@ -234,6 +257,11 @@ document.addEventListener('DOMContentLoaded', () => {
             vector2ComponentInput.style.display = isTwoVectorOp ? 'flex' : 'none';
             vector2RnInput.style.display = isTwoVectorOp ? 'block' : 'none';
             document.querySelector('.scalar-input-container').style.display = isScalarOp ? 'flex' : 'none';
+
+            if (!isTwoVectorOp && !isScalarOp) { // Handle single-vector ops like 'unit'
+                 vector2ComponentInput.style.display = 'none';
+                 vector2RnInput.style.display = 'none';
+            }
         });
 
         calculateButton.addEventListener('click', () => {
@@ -291,9 +319,11 @@ document.addEventListener('DOMContentLoaded', () => {
                         result = v1.map(val => val * scalar);
                         break;
                     case 'unit':
-                        const mag = Math.sqrt(v1.reduce((acc, val) => acc + val*val, 0));
+                        const magSquared = v1.reduce((acc, val) => acc + val*val, 0);
+                        const mag = Math.sqrt(magSquared);
                         if (mag === 0) throw new Error('No se puede calcular el vector unitario de un vector cero.');
                         result = v1.map(val => val / mag);
+                        result.symbolic = { components: v1, magSquared: magSquared };
                         break;
                 }
 
